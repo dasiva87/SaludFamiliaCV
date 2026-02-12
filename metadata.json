@@ -1,0 +1,7 @@
+{
+  "name": "Ficha de Valoración Familiar",
+  "description": "Herramienta digital de 9 pasos para valoración familiar basada en protocolos de enfermería con dashboard analítico.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
