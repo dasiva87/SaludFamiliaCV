@@ -4,20 +4,18 @@ const path = require('path');
 const cors = require('cors');
 const Database = require('better-sqlite3');
 const fs = require('fs');
+const esbuild = require('esbuild');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Asegurar que la carpeta /data existe para el volumen de Railway
-const dbFolder = '/data';
+// Configuración de persistencia para Railway
+const dbFolder = process.env.RAILWAY_VOLUME_MOUNT_PATH || './data';
 if (!fs.existsSync(dbFolder)) {
   fs.mkdirSync(dbFolder, { recursive: true });
 }
 
-// Inicializar base de datos
 const db = new Database(path.join(dbFolder, 'database.sqlite'));
-
-// Crear tabla si no existe
 db.exec(`
   CREATE TABLE IF NOT EXISTS records (
     id TEXT PRIMARY KEY,
@@ -29,21 +27,40 @@ db.exec(`
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// Servir archivos estáticos del frontend
+// MIDDLEWARE CRÍTICO: Transpila archivos .tsx y .ts en tiempo real
+app.get(/\.(tsx|ts)$/, (req, res) => {
+  const filePath = path.join(__dirname, req.path);
+  if (!fs.existsSync(filePath)) return res.status(404).send('File not found');
+
+  try {
+    const tsxCode = fs.readFileSync(filePath, 'utf8');
+    const result = esbuild.transformSync(tsxCode, {
+      loader: req.path.endsWith('.tsx') ? 'tsx' : 'ts',
+      format: 'esm',
+      target: 'es2020',
+    });
+    
+    res.setHeader('Content-Type', 'application/javascript');
+    res.send(result.code);
+  } catch (err) {
+    console.error('Error transpilando:', err);
+    res.status(500).send(err.message);
+  }
+});
+
+// Servir archivos estáticos (HTML, CSS, imágenes)
 app.use(express.static(__dirname));
 
-// API: Obtener todos los registros
+// API Routes
 app.get('/api/records', (req, res) => {
   try {
     const rows = db.prepare('SELECT data FROM records ORDER BY createdAt DESC').all();
-    const records = rows.map(row => JSON.parse(row.data));
-    res.json(records);
+    res.json(rows.map(row => JSON.parse(row.data)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// API: Guardar o actualizar registro
 app.post('/api/records', (req, res) => {
   const record = req.body;
   try {
@@ -55,7 +72,6 @@ app.post('/api/records', (req, res) => {
   }
 });
 
-// API: Eliminar registro
 app.delete('/api/records/:id', (req, res) => {
   try {
     db.prepare('DELETE FROM records WHERE id = ?').run(req.params.id);
@@ -65,12 +81,11 @@ app.delete('/api/records/:id', (req, res) => {
   }
 });
 
-// Todas las demás rutas sirven el index.html (para que React maneje el routing si fuera necesario)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-  console.log(`Base de datos lista en ${path.join(dbFolder, 'database.sqlite')}`);
+  console.log(`🚀 Servidor listo en puerto ${PORT}`);
+  console.log(`📁 BD en: ${path.join(dbFolder, 'database.sqlite')}`);
 });
