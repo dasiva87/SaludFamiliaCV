@@ -18,10 +18,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const loadData = async () => {
-    setLoading(true);
-    const data = await db.getRecords();
-    setRecords(data);
-    setLoading(false);
+    try {
+      setLoading(true);
+      const data = await db.getRecords();
+      setRecords(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Error loading records:", err);
+      setRecords([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -30,26 +36,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
 
   const stats = useMemo(() => {
     const totalFamilies = records.length;
-    const totalMembers = records.reduce((acc, r) => acc + (r.familyInfo?.members?.length || 0), 0);
+    const totalMembers = records.reduce((acc, r) => acc + (r?.familyInfo?.members?.length || 0), 0);
     
     const sisbenMap: any = {};
     records.forEach(r => {
-      const s = r.generalData?.sisben || 'Sin definir';
+      const s = r?.generalData?.sisben || 'Sin definir';
       sisbenMap[s] = (sisbenMap[s] || 0) + 1;
     });
     const sisbenData = Object.keys(sisbenMap).map(k => ({ name: k, value: sisbenMap[k] }));
 
     const healthMap: any = {};
     records.forEach(r => {
-      if (r.medicalHistory) {
+      if (r?.medicalHistory) {
         Object.keys(r.medicalHistory).forEach(condition => {
-          const isPresent = Object.values(r.medicalHistory[condition]).some(v => v === true);
-          if (isPresent) healthMap[condition] = (healthMap[condition] || 0) + 1;
+          const conditionValue = r.medicalHistory[condition];
+          if (conditionValue && typeof conditionValue === 'object') {
+            const isPresent = Object.values(conditionValue).some(v => v === true);
+            if (isPresent) healthMap[condition] = (healthMap[condition] || 0) + 1;
+          }
         });
       }
     });
     const healthData = Object.keys(healthMap).map(k => ({ name: k, count: healthMap[k] }));
-    const dbSize = (new Blob([JSON.stringify(records)]).size / 1024).toFixed(2);
+    
+    let dbSize = "0.00";
+    try {
+      dbSize = (new Blob([JSON.stringify(records)]).size / 1024).toFixed(2);
+    } catch (e) {}
 
     return { totalFamilies, totalMembers, sisbenData, healthData, dbSize };
   }, [records]);
@@ -75,11 +88,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
   );
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-8">
       {/* Modal de Configuración Cloud */}
       {showConfig && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in duration-300">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl">
             <h3 className="text-xl font-bold text-slate-800 mb-2">Configuración de Nube</h3>
             <p className="text-sm text-slate-500 mb-6">Ingresa la URL del servidor central para que todos los usuarios compartan la misma base de datos.</p>
             <div className="space-y-4">
@@ -87,7 +100,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
                 <label className="text-[10px] font-bold text-slate-400 uppercase">URL del Servidor API</label>
                 <input 
                   type="text" 
-                  placeholder="https://tu-api-enfermeria.com" 
+                  placeholder="https://tu-api.railway.app" 
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand outline-none text-sm"
                   value={apiUrl}
                   onChange={e => setApiUrl(e.target.value)}
@@ -111,8 +124,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
             </div>
             <div>
               <h4 className="font-bold text-slate-800">{apiUrl ? 'Modo Colaborativo Cloud' : 'Modo Autónomo Local'}</h4>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                {apiUrl ? `Conectado a: ${apiUrl.split('//')[1]?.split('/')[0]}` : 'Los datos solo viven en este navegador'}
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider truncate max-w-[200px]">
+                {apiUrl ? `Conectado: ${apiUrl}` : 'Los datos solo viven en este navegador'}
               </p>
             </div>
           </div>
@@ -127,10 +140,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
             <span className="text-white text-xs font-bold">Base de Datos JSON</span>
           </div>
           <div className="flex space-x-2">
-            <button onClick={() => db.exportDatabase()} className="w-10 h-10 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all flex items-center justify-center">
+            <button onClick={() => db.exportDatabase()} title="Exportar Backup" className="w-10 h-10 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all flex items-center justify-center">
               <i className="fas fa-download text-xs"></i>
             </button>
-            <button onClick={() => fileInputRef.current?.click()} className="w-10 h-10 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all flex items-center justify-center">
+            <button onClick={() => fileInputRef.current?.click()} title="Importar Backup" className="w-10 h-10 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all flex items-center justify-center">
               <i className="fas fa-upload text-xs"></i>
             </button>
             <input type="file" ref={fileInputRef} onChange={(e) => {
@@ -155,7 +168,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
         {[
           { label: 'Familias', val: stats.totalFamilies, icon: 'fa-house-user', color: 'text-brand' },
           { label: 'Individuos', val: stats.totalMembers, icon: 'fa-users', color: 'text-emerald-600' },
-          { label: 'Media Miembros', val: (stats.totalMembers / stats.totalFamilies || 0).toFixed(1), icon: 'fa-calculator', color: 'text-slate-600' },
+          { label: 'Media Miembros', val: (stats.totalMembers / (stats.totalFamilies || 1)).toFixed(1), icon: 'fa-calculator', color: 'text-slate-600' },
           { label: 'Riesgos Salud', val: stats.healthData.length, icon: 'fa-briefcase-medical', color: 'text-amber-600' }
         ].map((item, i) => (
           <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -169,39 +182,47 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm min-h-[400px]">
           <h4 className="font-bold text-slate-800 mb-6 flex items-center uppercase text-xs tracking-widest"><i className="fas fa-heart-pulse mr-2 text-brand"></i> Perfil Epidemiológico</h4>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.healthData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" fontSize={9} axisLine={false} tickLine={false} />
-                <YAxis axisLine={false} tickLine={false} fontSize={10} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#dd2836" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="h-72 w-full">
+            {stats.healthData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stats.healthData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" fontSize={9} axisLine={false} tickLine={false} interval={0} angle={-15} textAnchor="end" height={60} />
+                  <YAxis axisLine={false} tickLine={false} fontSize={10} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#dd2836" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400 text-sm">No hay datos de salud registrados.</div>
+            )}
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
-          <h4 className="font-bold text-slate-800 mb-6 flex items-center uppercase text-xs tracking-widest"><i className="fas fa-chart-pie mr-2 text-brand-dark"></i> Sisbén</h4>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={stats.sisbenData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={8} dataKey="value">
-                  {stats.sisbenData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+        <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm min-h-[400px]">
+          <h4 className="font-bold text-slate-800 mb-6 flex items-center uppercase text-xs tracking-widest"><i className="fas fa-chart-pie mr-2 text-brand-dark"></i> Clasificación Sisbén</h4>
+          <div className="h-72 w-full">
+            {stats.sisbenData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={stats.sisbenData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={8} dataKey="value">
+                    {stats.sisbenData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-400 text-sm">No hay datos de Sisbén registrados.</div>
+            )}
           </div>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
-          <h4 className="font-bold text-slate-800 text-xs uppercase tracking-widest">Registros {apiUrl ? 'Sincronizados' : 'Locales'}</h4>
+          <h4 className="font-bold text-slate-800 text-xs uppercase tracking-widest">Registros Sincronizados</h4>
           <button onClick={loadData} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-brand transition-colors">
             <i className="fas fa-sync-alt"></i>
           </button>
@@ -221,18 +242,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onEditRecord }) => {
                 <tr><td colSpan={4} className="px-8 py-12 text-center text-slate-400 text-sm">No hay registros para mostrar.</td></tr>
               ) : (
                 records.slice().reverse().map(r => (
-                  <tr key={r.id} className="hover:bg-slate-50 transition-colors group">
+                  <tr key={r?.id} className="hover:bg-slate-50 transition-colors group">
                     <td className="px-8 py-4">
-                      <div className="text-[10px] text-slate-400 font-mono">{r.id.slice(0, 8)}</div>
-                      <div className="text-[9px] text-slate-300 font-bold uppercase">{new Date(r.createdAt).toLocaleDateString()}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{r?.id?.slice(0, 8) || '---'}</div>
+                      <div className="text-[9px] text-slate-300 font-bold uppercase">{r?.createdAt ? new Date(r.createdAt).toLocaleDateString() : '---'}</div>
                     </td>
                     <td className="px-8 py-4">
-                      <div className="font-bold text-slate-800 uppercase text-xs">FAMILIA {r.familyInfo?.headLastName1 || '---'}</div>
-                      <div className="text-[10px] text-slate-500">{r.familyInfo?.neighborhood || '---'}</div>
+                      <div className="font-bold text-slate-800 uppercase text-xs">FAMILIA {r?.familyInfo?.headLastName1 || '---'}</div>
+                      <div className="text-[10px] text-slate-500">{r?.familyInfo?.neighborhood || '---'}</div>
                     </td>
                     <td className="px-8 py-4">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${apiUrl ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {apiUrl ? 'Nube' : 'Local'}
+                        {apiUrl ? 'Sincronizado' : 'Local'}
                       </span>
                     </td>
                     <td className="px-8 py-4 text-right">
